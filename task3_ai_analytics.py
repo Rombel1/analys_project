@@ -54,9 +54,10 @@ class AIAnalytics:
 
         if dynamics is None:
             return {
-                'trends': [],
+                'trends': ['Данные отсутствуют'],
                 'factors': [],
-                'detailed_analysis': "Данные для анализа не найдены"
+                'cagr': 0,
+                'total_change_percent': 0
             }
 
         trends = []
@@ -144,8 +145,8 @@ class AIAnalytics:
         return {
             'trends': trends,
             'factors': factors,
-            'cagr': cagr,
-            'total_change_percent': relative_change
+            'cagr': float(cagr),
+            'total_change_percent': float(relative_change)
         }
 
     # ==================== 3.3 Прогнозная оценка ====================
@@ -158,20 +159,35 @@ class AIAnalytics:
             return {
                 'assessment': f"Прогноз для города {city_name} не может быть построен",
                 'metrics': None,
-                'scenarios': None
+                'current_population': None,
+                'forecast_5y': None,
+                'forecast_10y': None,
+                'cagr': None,
+                'target_year': None,
+                'forecast_value': None,
+                'lower_bound': None,
+                'upper_bound': None,
+                'growth_rate': None
             }
 
         metrics = self.forecaster.calculate_metrics(forecast)
 
-        last_pop = forecast['last_population']
-        final_pop = forecast['predictions'][-1]
+        last_pop = int(forecast['last_population'])
+        
+        # Прогноз на 5 лет (индекс 4 для горизонта 5 лет от last_year+1)
+        forecast_5y = int(forecast['predictions'][4]) if len(forecast['predictions']) > 4 else None
+        
+        # Прогноз на 10 лет (индекс 9 для горизонта 10 лет от last_year+1)
+        forecast_10y = int(forecast['predictions'][9]) if len(forecast['predictions']) > 9 else None
+        
+        final_pop = int(forecast['predictions'][-1])
         total_change = final_pop - last_pop
         total_change_percent = (total_change / last_pop) * 100
 
-        if metrics and metrics['mape'] < 5:
+        if metrics and metrics.get('mape', 100) < 5:
             quality = "Высокая точность"
             confidence = "прогноз обладает высокой надежностью и может использоваться для планирования"
-        elif metrics and metrics['mape'] < 10:
+        elif metrics and metrics.get('mape', 100) < 10:
             quality = "Хорошая точность"
             confidence = "прогноз достаточно надежен для принятия решений"
         else:
@@ -179,33 +195,47 @@ class AIAnalytics:
             confidence = "прогноз требует осторожной интерпретации и регулярного обновления"
 
         # Доверительный интервал
-        lower = forecast.get('lower_bound', [final_pop * 0.95])[-1] if forecast.get('lower_bound') else final_pop * 0.95
-        upper = forecast.get('upper_bound', [final_pop * 1.05])[-1] if forecast.get('upper_bound') else final_pop * 1.05
+        lower = int(forecast.get('lower_bound', [final_pop * 0.95])[-1]) if forecast.get('lower_bound') is not None else int(final_pop * 0.95)
+        upper = int(forecast.get('upper_bound', [final_pop * 1.05])[-1]) if forecast.get('upper_bound') is not None else int(final_pop * 1.05)
+
+        # Среднегодовой темп роста (CAGR)
+        if last_pop > 0 and horizon > 0:
+            cagr = ((final_pop / last_pop) ** (1/horizon) - 1) * 100
+        else:
+            cagr = 0
+
+        mape_value = metrics.get('mape', 0) if metrics else 0
+        r2_value = metrics.get('r2', 0) if metrics else 0
+        mae_value = metrics.get('mae', 0) if metrics else 0
 
         assessment = f"""
-**Прогноз на {horizon} лет (до {forecast['future_years'][-1]} года):**
+**Прогноз на {horizon} лет (до {int(forecast['future_years'][-1])} года):**
 
 - Ожидаемая численность населения: **{int(final_pop):,}** чел.
 - Изменение за период: {total_change:+,} чел. ({total_change_percent:+.1f}%)
-- Среднегодовой темп: {((final_pop / last_pop) ** (1/horizon) - 1) * 100:+.2f}%
+- Среднегодовой темп: {cagr:+.2f}%
 
 **95% доверительный интервал:** [{int(lower):,} - {int(upper):,}] чел.
 
 **Качество прогноза:** {quality}
 - {confidence}
-- MAPE: {metrics['mape']:.1f}% (средняя абсолютная процентная ошибка)
-- R²: {metrics['r2']:.3f} (коэффициент детерминации)
-- MAE: {metrics['mae']:,} чел. (средняя абсолютная ошибка)
+- MAPE: {mape_value:.1f}% (средняя абсолютная процентная ошибка)
+- R²: {r2_value:.3f} (коэффициент детерминации)
+- MAE: {int(mae_value):,} чел. (средняя абсолютная ошибка)
 """
 
         return {
             'assessment': assessment.strip(),
             'metrics': metrics,
-            'target_year': forecast['future_years'][-1],
-            'forecast_value': int(final_pop),
-            'lower_bound': int(lower),
-            'upper_bound': int(upper),
-            'growth_rate': ((final_pop / last_pop) ** (1/horizon) - 1) * 100
+            'current_population': last_pop,
+            'forecast_5y': forecast_5y,
+            'forecast_10y': forecast_10y,
+            'cagr': round(cagr, 2),
+            'target_year': int(forecast['future_years'][-1]),
+            'forecast_value': final_pop,
+            'lower_bound': lower,
+            'upper_bound': upper,
+            'growth_rate': round(cagr, 2)
         }
 
     # ==================== 3.4 Рекомендации ====================
@@ -228,6 +258,7 @@ class AIAnalytics:
             recommendations.append({
                 'category': 'ИНФРАСТРУКТУРНОЕ РАЗВИТИЕ',
                 'title': 'Опережающее развитие социальной инфраструктуры',
+                'description': 'В связи с активным ростом населения необходимо опережающее развитие инфраструктуры',
                 'priority': 'high',
                 'actions': [
                     'Планирование строительства новых школ и детских садов (+2-3 в год)',
@@ -240,9 +271,10 @@ class AIAnalytics:
             recommendations.append({
                 'category': 'СОЦИАЛЬНАЯ ПОЛИТИКА',
                 'title': 'Поддержка семей с детьми',
+                'description': 'Для сохранения положительной динамики роста населения',
                 'priority': 'medium',
                 'actions': [
-                    'Материальная поддержка молодых Familien',
+                    'Материальная поддержка молодых семей',
                     'Льготная ипотека для семей с детьми',
                     'Развитие системы дополнительного образования'
                 ]
@@ -251,6 +283,7 @@ class AIAnalytics:
             recommendations.append({
                 'category': 'ДЕМОГРАФИЧЕСКАЯ ПОЛИТИКА',
                 'title': 'Стимулирование рождаемости и удержание населения',
+                'description': 'Для противодействия снижению численности населения',
                 'priority': 'high',
                 'actions': [
                     'Внедрение программ поддержки семей с детьми (выплаты, сертификаты)',
@@ -267,6 +300,7 @@ class AIAnalytics:
                 recommendations.append({
                     'category': 'ПОДДЕРЖКА РОЖДАЕМОСТИ',
                     'title': 'Повышение рождаемости',
+                    'description': f'Текущий уровень рождаемости {demo["birth_rate"]}‰ ниже среднего',
                     'priority': 'high',
                     'actions': [
                         'Введение дополнительных выплат при рождении детей',
@@ -280,6 +314,7 @@ class AIAnalytics:
                 recommendations.append({
                     'category': 'ЗДРАВООХРАНЕНИЕ',
                     'title': 'Снижение смертности',
+                    'description': f'Текущий уровень смертности {demo["death_rate"]}‰ выше среднего',
                     'priority': 'high',
                     'actions': [
                         'Модернизация системы здравоохранения',
@@ -296,6 +331,7 @@ class AIAnalytics:
                 recommendations.append({
                     'category': 'СТРАТЕГИЧЕСКОЕ ПЛАНИРОВАНИЕ',
                     'title': 'Долгосрочное развитие города',
+                    'description': 'Ожидается значительный рост населения',
                     'priority': 'high',
                     'actions': [
                         'Разработка мастер-плана развития города на 15-20 лет',
@@ -308,6 +344,7 @@ class AIAnalytics:
                 recommendations.append({
                     'category': 'АНТИКРИЗИСНЫЕ МЕРЫ',
                     'title': 'Предотвращение депопуляции',
+                    'description': 'Прогнозируется значительное снижение населения',
                     'priority': 'critical',
                     'actions': [
                         'Разработка комплексной программы возрождения территорий',
@@ -316,15 +353,28 @@ class AIAnalytics:
                         'Создание особой экономической зоны'
                     ]
                 })
+            else:
+                recommendations.append({
+                    'category': 'РАЗВИТИЕ',
+                    'title': 'Сбалансированное развитие',
+                    'description': 'Ожидается умеренное изменение численности населения',
+                    'priority': 'medium',
+                    'actions': [
+                        'Поддержание текущего уровня инфраструктуры',
+                        'Стимулирование экономической активности',
+                        'Улучшение качества городской среды'
+                    ]
+                })
 
-        # Общая рекомендация
+        # Общая рекомендация (всегда добавляем)
         recommendations.append({
             'category': 'МОНИТОРИНГ',
             'title': 'Регулярный анализ демографической ситуации',
+            'description': 'Для своевременного реагирования на изменения',
             'priority': 'medium',
             'actions': [
                 'Ежегодный пересмотр прогнозов',
-                'Корректировка стратегий развития с учетом актуальных Daten',
+                'Корректировка стратегий развития с учетом актуальных данных',
                 'Создание демографического совета при администрации'
             ]
         })
@@ -363,8 +413,8 @@ class AIAnalytics:
 
             # Пункт 3.2
             'section_32_trends_and_factors': {
-                'trends': trends_factors['trends'],
-                'factors': trends_factors['factors'],
+                'trends': trends_factors.get('trends', []),
+                'factors': trends_factors.get('factors', []),
                 'cagr': trends_factors.get('cagr', 0)
             },
 
@@ -405,13 +455,13 @@ class AIAnalytics:
 
         if forecast_assessment and forecast_assessment.get('target_year'):
             conclusion += f"""
-3. Прогноз на {forecast_assessment['target_year']} год: {forecast_assessment['forecast_value']:,} чел.
+3. Прогноз на {forecast_assessment['target_year']} год: {forecast_assessment.get('forecast_value', 'Н/Д'):,} чел.
 4. Качество прогноза: MAPE = {forecast_assessment.get('metrics', {}).get('mape', 'N/A')}%
 
 **Приоритетные направления развития:**
 - Реализация предложенных мер в соответствии с их приоритетностью
 - Регулярный мониторинг демографических показателей
-- Корректировка стратегий с учетом актуальных Daten
+- Корректировка стратегий с учетом актуальных данных
 """
 
         return conclusion.strip()
